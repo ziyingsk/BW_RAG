@@ -26,7 +26,7 @@ Replace the PDF files in the pdfs folder with the PDF file you want to query. Ac
 
 ## Contribution Guidelines
 
-Special thanks to Krishnaik06 for providing the RAG tutorial, from which we directly used some code; and thanks to AIA-Education for supporting this project. Visit their website: [AIA-Education](https://www.aia-edu.de/)
+Special thanks to [Krishnaik06](https://github.com/krishnaik06/Complete-Langchain-Tutorials) for providing the RAG tutorial, from which we directly used some code; and thanks to AIA-Education for supporting this project. Visit their website: [AIA-Education](https://www.aia-edu.de/)
 
 ## License
 
