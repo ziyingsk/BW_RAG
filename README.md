@@ -28,7 +28,7 @@ This project offers a completely free RAG solution that can run even on computer
 
 ## Contribution Guidelines
 
-Special thanks to [Krishnaik06](https://github.com/krishnaik06/Complete-Langchain-Tutorials) for providing the RAG tutorial, from which we directly used some code; and thanks to AIA-Education for supporting this project. Visit their website: [AIA-Education](https://www.aia-edu.de/)
+Special thanks to [Krishnaik06](https://github.com/krishnaik06/Complete-Langchain-Tutorials) for providing the RAG tutorial, from which we directly used some code; and thanks to [AIA-Education](https://www.aia-edu.de/) for supporting this project.
 
 ## License
 
