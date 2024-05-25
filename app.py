@@ -4,8 +4,8 @@ process:
  1. Read and divided pdf into chucks
  2. Embedde chucks and save to database
  3. Search query context in the database
- 4. Rerank the contexts
- 5. Answer = Query + context + LLM
+ 4. Rerank the contexts with Rerank LLM
+ 5. Answer by run query LLM
 """
 import os
 from dotenv import load_dotenv
@@ -79,6 +79,8 @@ def chunks(iterable, batch_size=100):
 if database_dataready is False:
      vector_count = len(documents)
      example_data_generator = map(lambda i: (f'id-{i}', pdf_vectors[i],{"text": texts[i]}), range(vector_count))
+     vector_ids = index.fetch(ids=index.describe_index()["index_size"])["ids"]
+     index.delete(ids=vector_ids)
      for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):
          index.upsert(vectors=ids_vectors_chunk) 
 
@@ -118,8 +120,8 @@ with torch.no_grad():
     scores = model(**inputs, return_dict=True).logits.view(-1, ).float()
     print(scores)
 matched_contents = [content for _, content in sorted(zip(scores, matched_contents), key=lambda x: x[0], reverse=True)]
-matched_contents = matched_contents[:2]
-matched_contents = "\n\n".join(matched_contents)
+matched_contents = matched_contents[0]
+#matched_contents = "\n\n".join(matched_contents)
 del model
 torch.cuda.empty_cache()
 
@@ -128,11 +130,24 @@ Get answer
 """
 query_model="meta-llama/Meta-Llama-3-8B-Instruct" 
 llm_huggingface=HuggingFaceHub(repo_id=query_model,
-                               model_kwargs={"temperature":0.7,"max_length":500}) #API_URL = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
+                               model_kwargs={"temperature":0.7,"max_length":500,"eos_token_id":128009}) #API_URL = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
 
 prompt_template=PromptTemplate(input_variables=['query','context'],
-                               template="{query}, Beim Beantworten der Frage bitte mit dem Wort 'Antwort' beginnen，unter Berücksichtigung des folgenden Kontexts: \n\n{context}, bitte ")
+                               template="{query}, Beim Beantworten der Frage bitte mit dem Wort 'Antwort:' beginnen，unter Berücksichtigung des folgenden Kontexts: \n\n{context}")
 
-#prompt_template.format(query=sample_query, context=matched_contents)
+prompt = prompt_template.format(query=sample_query, context=matched_contents)
 chain=LLMChain(llm=llm_huggingface,prompt=prompt_template)
-print(chain.run(query=sample_query, context=matched_contents))
+result = chain.run(query=sample_query, context=matched_contents)
+
+"""
+Polish answer
+"""
+
+result = result.replace(prompt, "")
+special_start = "Antwort:"
+start_index = result.find(special_start)
+if start_index != -1:
+    result = result[start_index + len(special_start):].lstrip()
+else:
+    result = result.lstrip() 
+print(result)
