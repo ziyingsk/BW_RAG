@@ -22,9 +22,9 @@ This project offers a completely free RAG solution that can run even on computer
 
 ## Usage
 
-1. Replace the PDF files in the pdfs folder with the PDF file you want to query.
-2. Activate the virtual environment you created.
-3. Run app.py. During the first run, ensure the `.env` file has `DATA_READY = False`. For subsequent runs, you can set this to `True`.
+1. Activate the virtual environment you created.
+2. Run the following command in the terminal: streamlit run app.py
+3. Follow the instructions provided by the running application and enjoy!
 
 ## Contribution Guidelines
 

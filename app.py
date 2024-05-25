@@ -1,73 +1,45 @@
-# Part of the code was from the repo: https://github.com/krishnaik06/Complete-Langchain-Tutorials
-"""
-process:
- 1. Read and divided pdf into chucks
- 2. Embedde chucks and save to database
- 3. Search query context in the database
- 4. Rerank the contexts with Rerank LLM
- 5. Answer by run query LLM
-"""
 import os
+import streamlit as st
 from dotenv import load_dotenv
 import itertools
 from pinecone import Pinecone
 from langchain_community.llms import HuggingFaceHub
 from langchain.chains import LLMChain
-from langchain_community.document_loaders import PyPDFDirectoryLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.prompts import PromptTemplate
-#from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForQuestionAnswering
-#import pandas as pd
 from sentence_transformers import SentenceTransformer
+import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-"""
-set up enviroment, Pinecone is a datebase
-"""
+# Set up environment, Pinecone is a database
+load_dotenv()  # Load document .env
+cache_dir = os.getenv("CACHE_DIR")  # Directory for cache
+Huggingface_token = os.getenv("API_TOKEN")  # Huggingface API key
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))  # Database API key
+index = pc.Index(os.getenv("Index_Name"))  # Database index name
+database_dataready = os.getenv("DATA_READY")  # If data already stored in database
 
-load_dotenv() # load document .env
-cache_dir = os.getenv("CACHE_DIR") # dir for cache
-Huggingface_token = os.getenv("API_TOKEN") #Huggingface_api_key
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY")) #database_api_key
-index = pc.Index(os.getenv("Index_Name")) #database index_name
-database_dataready = os.getenv("DATA_READY") #if data already stored in database
-
-"""
-initialize embedding model(llm will be saved to cache_dir if assigned)
-"""
-embedding_model="all-mpnet-base-v2" #see link https://www.sbert.net/docs/pretrained_models.html
+# Initialize embedding model (LLM will be saved to cache_dir if assigned)
+embedding_model = "all-mpnet-base-v2"  # See link https://www.sbert.net/docs/pretrained_models.html
 
 if cache_dir:
-    embedding = SentenceTransformer(embedding_model,cache_folder=cache_dir)
+    embedding = SentenceTransformer(embedding_model, cache_folder=cache_dir)
 else:
     embedding = SentenceTransformer(embedding_model)
 
-"""
-Read the pdf files, divie them into chunks and Embedding
-"""
-def read_doc(directory):
-    file_loader=PyPDFDirectoryLoader(directory)
-    documents=file_loader.load()
+# Read the PDF files, divide them into chunks, and Embedding
+def read_doc(file_path):
+    file_loader = PyPDFLoader(file_path)
+    documents = file_loader.load_and_split()
     return documents
 
-def chunk_data(docs,chunk_size=300,chunk_overlap=50):
-    text_splitter=RecursiveCharacterTextSplitter(chunk_size=chunk_size,chunk_overlap=chunk_overlap)
-    doc=text_splitter.split_documents(docs)
+def chunk_data(docs, chunk_size=300, chunk_overlap=50):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    doc = text_splitter.split_documents(docs)
     return doc
 
-if database_dataready is False:
-    doc=read_doc('pdfs/')
-    print("Number of pages:",len(doc))
-    documents=chunk_data(docs=doc)
-    print("Number of chunks:",len(documents))
-    texts = [document.page_content for document in documents]
-    pdf_vectors = embedding.encode(texts)
-    print("Number of vectors:", len(pdf_vectors))
-    print("Number of dimensions:",len(pdf_vectors[0]))
-
-"""
-Save embeddings to database
-"""
-
+# Save embeddings to database
 def chunks(iterable, batch_size=100):
     """A helper function to break an iterable into chunks of size batch_size."""
     it = iter(iterable)
@@ -76,78 +48,88 @@ def chunks(iterable, batch_size=100):
         yield chunk
         chunk = tuple(itertools.islice(it, batch_size))
 
-if database_dataready is False:
-     vector_count = len(documents)
-     example_data_generator = map(lambda i: (f'id-{i}', pdf_vectors[i],{"text": texts[i]}), range(vector_count))
-     vector_ids = index.fetch(ids=index.describe_index()["index_size"])["ids"]
-     index.delete(ids=vector_ids)
-     for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):
-         index.upsert(vectors=ids_vectors_chunk) 
+# Streamlit interface start, uploading file
+st.title("RAG-Anwendung (RAG Application)")
+st.caption("Diese Anwendung kann Ihnen helfen, kostenlos Fragen zu PDF-Dateien zu stellen. (This application can help you ask questions about PDF files for free.)")
 
-"""
-Search query related context
-"""
-sample_query = "Welche Fähigkeiten sollen Schüler und Schülerinnen im Bereich 'monologisch sprechen' haben?"
-query_vector = embedding.encode(sample_query).tolist()
-query_search = index.query(
-    #namespace="(default)",
-    vector=query_vector,
-    top_k=5,
-    include_metadata=True
-)
+uploaded_file = st.file_uploader("Wählen Sie eine PDF-Datei, das Laden kann eine Weile dauern. (Choose a PDF file, loading might take a while.)", type="pdf")
+if uploaded_file is not None:
+    # Ensure the temp directory exists
+    temp_dir = "tempDir"
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
 
-matched_contents = [match["metadata"]["text"] for match in query_search["matches"]]
+    # Save the uploaded file temporarily
+    temp_file_path = os.path.join(temp_dir, uploaded_file.name)
+    with open(temp_file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
 
-"""
-Rerank
-"""
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    doc = read_doc(temp_file_path)
+    documents = chunk_data(docs=doc)
 
-#rerank_context_num = 2 #number of contexts after rerank
-rerank_model = "BAAI/bge-reranker-v2-m3"
-if cache_dir:
-    tokenizer = AutoTokenizer.from_pretrained(rerank_model,cache_dir=cache_dir)
-    model = AutoModelForSequenceClassification.from_pretrained(rerank_model,cache_dir=cache_dir)
-else:
-    tokenizer = AutoTokenizer.from_pretrained(rerank_model)
-    model = AutoModelForSequenceClassification.from_pretrained(rerank_model)
-model.eval()
+    texts = [document.page_content for document in documents]
+    pdf_vectors = embedding.encode(texts)
 
-pairs = [[sample_query, content] for content in matched_contents]
-with torch.no_grad():
-    inputs = tokenizer(pairs, padding=True, truncation=True, return_tensors='pt', max_length=300)
-    scores = model(**inputs, return_dict=True).logits.view(-1, ).float()
-    print(scores)
-matched_contents = [content for _, content in sorted(zip(scores, matched_contents), key=lambda x: x[0], reverse=True)]
-matched_contents = matched_contents[0]
-#matched_contents = "\n\n".join(matched_contents)
-del model
-torch.cuda.empty_cache()
+    if not database_dataready:
+        vector_count = len(documents)
+        example_data_generator = map(lambda i: (f'id-{i}', pdf_vectors[i], {"text": texts[i]}), range(vector_count))
+        vector_ids = index.fetch(ids=index.describe_index()["index_size"])["ids"]
+        index.delete(ids=vector_ids)
+        for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):
+            index.upsert(vectors=ids_vectors_chunk)
 
-"""
-Get answer
-"""
-query_model="meta-llama/Meta-Llama-3-8B-Instruct" 
-llm_huggingface=HuggingFaceHub(repo_id=query_model,
-                               model_kwargs={"temperature":0.7,"max_length":500,"eos_token_id":128009}) #API_URL = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
+# Search query related context
+sample_query = st.text_input("Stellen Sie eine Frage zu dem PDF: (Ask a question related to the PDF:)")
+if st.button("Abschicken (Submit)"):
+    if uploaded_file is not None and sample_query:
+        query_vector = embedding.encode(sample_query).tolist()
+        query_search = index.query(vector=query_vector, top_k=5, include_metadata=True)
 
-prompt_template=PromptTemplate(input_variables=['query','context'],
-                               template="{query}, Beim Beantworten der Frage bitte mit dem Wort 'Antwort:' beginnen，unter Berücksichtigung des folgenden Kontexts: \n\n{context}")
+        matched_contents = [match["metadata"]["text"] for match in query_search["matches"]]
 
-prompt = prompt_template.format(query=sample_query, context=matched_contents)
-chain=LLMChain(llm=llm_huggingface,prompt=prompt_template)
-result = chain.run(query=sample_query, context=matched_contents)
+        # Rerank
+        rerank_model = "BAAI/bge-reranker-v2-m3"
+        if cache_dir:
+            tokenizer = AutoTokenizer.from_pretrained(rerank_model, cache_dir=cache_dir)
+            model = AutoModelForSequenceClassification.from_pretrained(rerank_model, cache_dir=cache_dir)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(rerank_model)
+            model = AutoModelForSequenceClassification.from_pretrained(rerank_model)
+        model.eval()
 
-"""
-Polish answer
-"""
+        pairs = [[sample_query, content] for content in matched_contents]
+        with torch.no_grad():
+            inputs = tokenizer(pairs, padding=True, truncation=True, return_tensors='pt', max_length=300)
+            scores = model(**inputs, return_dict=True).logits.view(-1, ).float()
+            matched_contents = [content for _, content in sorted(zip(scores, matched_contents), key=lambda x: x[0], reverse=True)]
+            matched_contents = matched_contents[0]
+        del model
+        torch.cuda.empty_cache()
 
-result = result.replace(prompt, "")
-special_start = "Antwort:"
-start_index = result.find(special_start)
-if start_index != -1:
-    result = result[start_index + len(special_start):].lstrip()
-else:
-    result = result.lstrip() 
-print(result)
+        # Display matched contents after reranking
+        st.markdown("### Möglicherweise relevante Abschnitte aus dem PDF (Potentially relevant sections from the PDF):")
+        st.write(matched_contents)
+
+        # Get answer
+        query_model = "meta-llama/Meta-Llama-3-8B-Instruct"
+        llm_huggingface = HuggingFaceHub(repo_id=query_model, model_kwargs={"temperature": 0.7, "max_length": 500})
+
+        prompt_template = PromptTemplate(input_variables=['query', 'context'], template="{query}, Beim Beantworten der Frage bitte mit dem Wort 'Antwort:' beginnen，unter Berücksichtigung des folgenden Kontexts: \n\n{context}")
+
+        prompt = prompt_template.format(query=sample_query, context=matched_contents)
+        chain = LLMChain(llm=llm_huggingface, prompt=prompt_template)
+        result = chain.run(query=sample_query, context=matched_contents)
+
+        # Polish answer
+        result = result.replace(prompt, "")
+        special_start = "Antwort:"
+        start_index = result.find(special_start)
+        if (start_index != -1):
+            result = result[start_index + len(special_start):].lstrip()
+        else:
+            result = result.lstrip()
+
+        # Display the final answer with a note about limitations
+        st.markdown("### Antwort (Answer):")
+        st.write(result)
+        st.markdown("**Hinweis:** Aufgrund begrenzter Rechenleistung kann das große Sprachmodell möglicherweise keine vollständige Antwort liefern. (Note: Due to limited computational power, the large language model might not be able to provide a complete response.)")
