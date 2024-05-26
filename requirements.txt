@@ -6,3 +6,4 @@ sentence_transformers==2.7.0
 torch==2.3.0
 transformers==4.40.2
 streamlit==1.35.0
+pypdf==4.2.0
