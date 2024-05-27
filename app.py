@@ -5,12 +5,13 @@ import itertools
 from pinecone import Pinecone
 from langchain_community.llms import HuggingFaceHub
 from langchain.chains import LLMChain
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.prompts import PromptTemplate
 from sentence_transformers import SentenceTransformer
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import logging
 
 # Set up environment, Pinecone is a database
 load_dotenv()  # Load document .env
@@ -18,7 +19,6 @@ cache_dir = os.getenv("CACHE_DIR")  # Directory for cache
 Huggingface_token = os.getenv("API_TOKEN")  # Huggingface API key
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))  # Database API key
 index = pc.Index(os.getenv("Index_Name"))  # Database index name
-database_dataready = os.getenv("DATA_READY")  # If data already stored in database
 
 # Initialize embedding model (LLM will be saved to cache_dir if assigned)
 embedding_model = "all-mpnet-base-v2"  # See link https://www.sbert.net/docs/pretrained_models.html
@@ -30,8 +30,8 @@ else:
 
 # Read the PDF files, divide them into chunks, and Embedding
 def read_doc(file_path):
-    file_loader = PyPDFLoader(file_path)
-    documents = file_loader.load_and_split()
+    file_loader = PyPDFDirectoryLoader(file_path)
+    documents = file_loader.load()
     return documents
 
 def chunk_data(docs, chunk_size=300, chunk_overlap=50):
@@ -54,29 +54,32 @@ st.caption("Diese Anwendung kann Ihnen helfen, kostenlos Fragen zu PDF-Dateien z
 
 uploaded_file = st.file_uploader("Wählen Sie eine PDF-Datei, das Laden kann eine Weile dauern. (Choose a PDF file, loading might take a while.)", type="pdf")
 if uploaded_file is not None:
-    # Ensure the temp directory exists
+    # Ensure the temp directory exists and is empty
     temp_dir = "tempDir"
-    if not os.path.exists(temp_dir):
-        os.makedirs(temp_dir)
+    if os.path.exists(temp_dir):
+        for file in os.listdir(temp_dir):
+            file_path = os.path.join(temp_dir, file)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+            elif os.path.isdir(file_path):
+                os.rmdir(file_path)  # Only removes empty directories
+
+    os.makedirs(temp_dir, exist_ok=True)
 
     # Save the uploaded file temporarily
     temp_file_path = os.path.join(temp_dir, uploaded_file.name)
     with open(temp_file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
-
-    doc = read_doc(temp_file_path)
+    doc = read_doc(temp_dir+"/")
     documents = chunk_data(docs=doc)
-
     texts = [document.page_content for document in documents]
     pdf_vectors = embedding.encode(texts)
-
-    if not database_dataready:
-        vector_count = len(documents)
-        example_data_generator = map(lambda i: (f'id-{i}', pdf_vectors[i], {"text": texts[i]}), range(vector_count))
-        vector_ids = index.fetch(ids=index.describe_index()["index_size"])["ids"]
-        index.delete(ids=vector_ids)
-        for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):
-            index.upsert(vectors=ids_vectors_chunk)
+    vector_count = len(documents)
+    example_data_generator = map(lambda i: (f'id-{i}', pdf_vectors[i], {"text": texts[i]}), range(vector_count))
+    if 'ns1' in index.describe_index_stats()['namespaces']:
+        index.delete(delete_all=True,namespace='ns1')
+    for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):
+        index.upsert(vectors=ids_vectors_chunk,namespace='ns1')
 
 # Search query related context
 sample_query = st.text_input("Stellen Sie eine Frage zu dem PDF: (Ask a question related to the PDF:)")

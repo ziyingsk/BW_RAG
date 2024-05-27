@@ -1,6 +1,6 @@
 langchain==0.1.20
 langchain_community==0.0.38
-pinecone==4.0.0
+pinecone-client==4.1.0
 python-dotenv==1.0.1
 sentence_transformers==2.7.0
 torch==2.3.0
