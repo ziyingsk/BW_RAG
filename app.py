@@ -11,7 +11,6 @@ from langchain.prompts import PromptTemplate
 from sentence_transformers import SentenceTransformer
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-import logging
 
 # Set up environment, Pinecone is a database
 load_dotenv()  # Load document .env
