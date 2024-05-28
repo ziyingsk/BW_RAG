@@ -11,6 +11,7 @@ from langchain.prompts import PromptTemplate
 from sentence_transformers import SentenceTransformer
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import time
 
 # Set up environment variables and Pinecone database
 load_dotenv()  # Load environment variables from a .env file
@@ -80,21 +81,30 @@ if uploaded_file is not None:
     vector_count = len(documents)
     example_data_generator = map(lambda i: (f'id-{i}', pdf_vectors[i], {"text": texts[i]}), range(vector_count))
     
-    # Update the Pinecone index with new vectors
-    if 'ns1' in index.describe_index_stats()['namespaces']:
-        index.delete(delete_all=True, namespace='ns1')
-    for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):
-        index.upsert(vectors=ids_vectors_chunk, namespace='ns1')
+# Update the Pinecone index with new vectors
+for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):  # Iterate through chunks of example data
+    index.upsert(vectors=ids_vectors_chunk, namespace='ns1')  # Upsert (update or insert) vectors
+    time.sleep(0.05)  # Pause to avoid overwhelming the server
+
+ns_count = index.describe_index_stats()['namespaces']['ns1']['vector_count']  # Get current vector count in namespace 'ns1'
+
+if vector_count < ns_count:  # Check if the old vectors are still inside
+    ids_to_delete = [f'id-{i}' for i in range(vector_count, ns_count)]  # Generate list of IDs to delete
+    index.delete(ids=ids_to_delete, namespace='ns1')  # Delete old vectors
+    time.sleep(0.05)  # Pause to avoid overwhelming the server
 
 # Input for the search query
-sample_query = st.text_input("Stellen Sie eine Frage zu dem PDF: (Ask a question related to the PDF:)")
-if st.button("Abschicken (Submit)"):
-    if uploaded_file is not None and sample_query:
-        # Encode the query and search in the Pinecone index
-        query_vector = embedding.encode(sample_query).tolist()
-        query_search = index.query(vector=query_vector, top_k=5, include_metadata=True,namespace='ns1')
+with st.form(key='my_form'):
+    sample_query = st.text_input("Stellen Sie eine Frage zu dem PDF: (Ask a question related to the PDF:)")  # User query input
+    submit_button = st.form_submit_button(label='Abschicken (Submit)')  # Submit button
 
-        matched_contents = [match["metadata"]["text"] for match in query_search["matches"]]
+if submit_button:
+    if uploaded_file is not None and sample_query:  # Check if file is uploaded and query provided
+        query_vector = embedding.encode(sample_query).tolist()  # Encode query to vector
+        query_search = index.query(vector=query_vector, top_k=5, include_metadata=True, namespace='ns1')  # Search index
+        time.sleep(0.1)  # Pause to avoid overwhelming the server
+        matched_contents = [match["metadata"]["text"] for match in query_search["matches"]]  # Extract text metadata from results
+
 
         # Rerank the matched contents
         rerank_model = "BAAI/bge-reranker-v2-m3"
