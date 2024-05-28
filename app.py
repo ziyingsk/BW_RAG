@@ -12,33 +12,34 @@ from sentence_transformers import SentenceTransformer
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-# Set up environment, Pinecone is a database
-load_dotenv()  # Load document .env
+# Set up environment variables and Pinecone database
+load_dotenv()  # Load environment variables from a .env file
 cache_dir = os.getenv("CACHE_DIR")  # Directory for cache
-Huggingface_token = os.getenv("API_TOKEN")  # Huggingface API key
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))  # Database API key
-index = pc.Index(os.getenv("Index_Name"))  # Database index name
+Huggingface_token = os.getenv("API_TOKEN")  # Huggingface API token
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))  # Pinecone API key
+index = pc.Index(os.getenv("Index_Name"))  # Pinecone index name
 
 # Initialize embedding model (LLM will be saved to cache_dir if assigned)
-embedding_model = "all-mpnet-base-v2"  # See link https://www.sbert.net/docs/pretrained_models.html
+embedding_model = "all-mpnet-base-v2"  # Pretrained model name for embeddings
 
 if cache_dir:
     embedding = SentenceTransformer(embedding_model, cache_folder=cache_dir)
 else:
     embedding = SentenceTransformer(embedding_model)
 
-# Read the PDF files, divide them into chunks, and Embedding
+# Function to read PDF files and return documents
 def read_doc(file_path):
     file_loader = PyPDFDirectoryLoader(file_path)
     documents = file_loader.load()
     return documents
 
+# Function to split documents into chunks
 def chunk_data(docs, chunk_size=300, chunk_overlap=50):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     doc = text_splitter.split_documents(docs)
     return doc
 
-# Save embeddings to database
+# Function to break an iterable into chunks of specified size
 def chunks(iterable, batch_size=100):
     """A helper function to break an iterable into chunks of size batch_size."""
     it = iter(iterable)
@@ -47,10 +48,11 @@ def chunks(iterable, batch_size=100):
         yield chunk
         chunk = tuple(itertools.islice(it, batch_size))
 
-# Streamlit interface start, uploading file
+# Start of Streamlit interface
 st.title("RAG-Anwendung (RAG Application)")
 st.caption("Diese Anwendung kann Ihnen helfen, kostenlos Fragen zu PDF-Dateien zu stellen. (This application can help you ask questions about PDF files for free.)")
 
+# Upload a PDF file
 uploaded_file = st.file_uploader("Wählen Sie eine PDF-Datei, das Laden kann eine Weile dauern. (Choose a PDF file, loading might take a while.)", type="pdf")
 if uploaded_file is not None:
     # Ensure the temp directory exists and is empty
@@ -69,27 +71,32 @@ if uploaded_file is not None:
     temp_file_path = os.path.join(temp_dir, uploaded_file.name)
     with open(temp_file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
-    doc = read_doc(temp_dir+"/")
+    
+    # Process the uploaded PDF file
+    doc = read_doc(temp_dir + "/")
     documents = chunk_data(docs=doc)
     texts = [document.page_content for document in documents]
     pdf_vectors = embedding.encode(texts)
     vector_count = len(documents)
     example_data_generator = map(lambda i: (f'id-{i}', pdf_vectors[i], {"text": texts[i]}), range(vector_count))
+    
+    # Update the Pinecone index with new vectors
     if 'ns1' in index.describe_index_stats()['namespaces']:
-        index.delete(delete_all=True,namespace='ns1')
+        index.delete(delete_all=True, namespace='ns1')
     for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):
-        index.upsert(vectors=ids_vectors_chunk,namespace='ns1')
+        index.upsert(vectors=ids_vectors_chunk, namespace='ns1')
 
-# Search query related context
+# Input for the search query
 sample_query = st.text_input("Stellen Sie eine Frage zu dem PDF: (Ask a question related to the PDF:)")
 if st.button("Abschicken (Submit)"):
     if uploaded_file is not None and sample_query:
+        # Encode the query and search in the Pinecone index
         query_vector = embedding.encode(sample_query).tolist()
         query_search = index.query(vector=query_vector, top_k=5, include_metadata=True)
 
         matched_contents = [match["metadata"]["text"] for match in query_search["matches"]]
 
-        # Rerank
+        # Rerank the matched contents
         rerank_model = "BAAI/bge-reranker-v2-m3"
         if cache_dir:
             tokenizer = AutoTokenizer.from_pretrained(rerank_model, cache_dir=cache_dir)
@@ -112,7 +119,7 @@ if st.button("Abschicken (Submit)"):
         st.markdown("### Möglicherweise relevante Abschnitte aus dem PDF (Potentially relevant sections from the PDF):")
         st.write(matched_contents)
 
-        # Get answer
+        # Generate an answer using a language model
         query_model = "meta-llama/Meta-Llama-3-8B-Instruct"
         llm_huggingface = HuggingFaceHub(repo_id=query_model, model_kwargs={"temperature": 0.7, "max_length": 500})
 
@@ -122,11 +129,11 @@ if st.button("Abschicken (Submit)"):
         chain = LLMChain(llm=llm_huggingface, prompt=prompt_template)
         result = chain.run(query=sample_query, context=matched_contents)
 
-        # Polish answer
+        # Polish the answer
         result = result.replace(prompt, "")
         special_start = "Antwort:"
         start_index = result.find(special_start)
-        if (start_index != -1):
+        if start_index != -1:
             result = result[start_index + len(special_start):].lstrip()
         else:
             result = result.lstrip()
