@@ -8,8 +8,6 @@ This project offers a completely free RAG solution that can run even on computer
 
 ## Principle Explanation
 
-下面是该项目的原理解释：
-
 ![Principle Explanation](Principle.png)
 
 ## Features
