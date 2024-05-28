@@ -6,6 +6,12 @@ BW_RAG is a Retrieval-Augmented Generation (RAG) application designed to handle 
 
 This project offers a completely free RAG solution that can run even on computers with average specifications.
 
+## Principle Explanation
+
+下面是该项目的原理解释：
+
+![Principle Explanation](Principle.png)
+
 ## Features
 
 - Vectorize specified PDF files and store them in a database.
