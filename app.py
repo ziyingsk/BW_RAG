@@ -92,7 +92,7 @@ if st.button("Abschicken (Submit)"):
     if uploaded_file is not None and sample_query:
         # Encode the query and search in the Pinecone index
         query_vector = embedding.encode(sample_query).tolist()
-        query_search = index.query(vector=query_vector, top_k=5, include_metadata=True，namespace='ns1')
+        query_search = index.query(vector=query_vector, top_k=5, include_metadata=True,namespace='ns1')
 
         matched_contents = [match["metadata"]["text"] for match in query_search["matches"]]
 
