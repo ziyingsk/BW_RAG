@@ -81,17 +81,17 @@ if uploaded_file is not None:
     vector_count = len(documents)
     example_data_generator = map(lambda i: (f'id-{i}', pdf_vectors[i], {"text": texts[i]}), range(vector_count))
     
-# Update the Pinecone index with new vectors
-for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):  # Iterate through chunks of example data
-    index.upsert(vectors=ids_vectors_chunk, namespace='ns1')  # Upsert (update or insert) vectors
-    time.sleep(0.05)  # Pause to avoid overwhelming the server
+    # Update the Pinecone index with new vectors
+    for ids_vectors_chunk in chunks(example_data_generator, batch_size=100):  # Iterate through chunks of example data
+        index.upsert(vectors=ids_vectors_chunk, namespace='ns1')  # Upsert (update or insert) vectors
+        time.sleep(0.05)  # Pause to avoid overwhelming the server
 
-ns_count = index.describe_index_stats()['namespaces']['ns1']['vector_count']  # Get current vector count in namespace 'ns1'
+    ns_count = index.describe_index_stats()['namespaces']['ns1']['vector_count']  # Get current vector count in namespace 'ns1'
 
-if vector_count < ns_count:  # Check if the old vectors are still inside
-    ids_to_delete = [f'id-{i}' for i in range(vector_count, ns_count)]  # Generate list of IDs to delete
-    index.delete(ids=ids_to_delete, namespace='ns1')  # Delete old vectors
-    time.sleep(0.05)  # Pause to avoid overwhelming the server
+    if vector_count < ns_count:  # Check if the old vectors are still inside
+        ids_to_delete = [f'id-{i}' for i in range(vector_count, ns_count)]  # Generate list of IDs to delete
+        index.delete(ids=ids_to_delete, namespace='ns1')  # Delete old vectors
+        time.sleep(0.05)  # Pause to avoid overwhelming the server
 
 # Input for the search query
 with st.form(key='my_form'):
