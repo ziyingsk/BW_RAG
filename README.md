@@ -2,7 +2,7 @@
 
 BW_RAG is a Retrieval-Augmented Generation (RAG) application designed to handle questions about German PDF documents.
 
-
+Now you can directly experience the application at [my huggingface space](https://huggingface.co/spaces/ziyingsk/BW_RAG)!
 ## Background and Motivation
 
 This project offers a completely free RAG solution that can run even on computers with average specifications.
